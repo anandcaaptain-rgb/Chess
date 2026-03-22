@@ -1,277 +1,65 @@
-<!DOCTYPE html>
-<html>
+<!DOCTYPE html><html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Final Boss Chess</title>
-
+<title>My Chess Game</title>
 <style>
-body { font-family: Arial; text-align:center; background:#111; color:white; }
-#board {
-  display:grid;
-  grid-template-columns: repeat(8,70px);
-  width:560px;
-  margin:20px auto;
-  border:3px solid white;
-}
-.cell {
-  width:70px; height:70px;
-  display:flex; align-items:center; justify-content:center;
-  font-size:34px; cursor:pointer;
-}
-.white{background:#eee; color:black;}
-.black{background:#444;}
-.highlight{background:#00aa00 !important;}
-.selected{outline:3px solid yellow;}
-
-textarea{width:90%;height:60px;}
-button{margin:5px;padding:8px;}
+  body { display:flex; justify-content:center; margin-top:20px; }
+  #board { display:grid; grid-template-columns: repeat(8, 60px); grid-template-rows: repeat(8, 60px); }
+  .square { width:60px; height:60px; display:flex; justify-content:center; align-items:center; }
+  .white { background:#f0d9b5; }
+  .black { background:#b58863; }
+  img { width:50px; height:50px; pointer-events:none; }
+  #roomUI { margin-left:20px; }
+  button { margin-top:5px; }
 </style>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
 </head>
-
 <body>
-
-<h2>🔥 Final Boss Chess (Single File)</h2>
-
-<button onclick="createOffer()">Create Room</button>
-<button onclick="joinRoom()">Join Room</button>
-
-<p>Share code:</p>
-<textarea id="code"></textarea>
-
-<p>Paste opponent code:</p>
-<textarea id="remote"></textarea>
-<button onclick="connect()">Connect</button>
-
 <div id="board"></div>
-
+<div id="roomUI">
+  <input id="roomInput" placeholder="Room code" />
+  <button onclick="createRoom()">Create Room</button>
+  <button onclick="joinRoom()">Join Room</button>
+  <div id="status"></div>
+</div>
 <script>
-
-let board = [
-["r","n","b","q","k","b","n","r"],
-["p","p","p","p","p","p","p","p"],
-["","","","","","","",""],
-["","","","","","","",""],
-["","","","","","","",""],
-["","","","","","","",""],
-["P","P","P","P","P","P","P","P"],
-["R","N","B","Q","K","B","N","R"]
-];
-
-let turn="w";
-let selected=null;
-let legal=[];
-
-const boardDiv=document.getElementById("board");
-
-function isWhite(p){ return p && p===p.toUpperCase(); }
-
-function draw(){
- boardDiv.innerHTML="";
- for(let r=0;r<8;r++){
-  for(let c=0;c<8;c++){
-    let d=document.createElement("div");
-    d.className="cell "+((r+c)%2?"black":"white");
-
-    if(selected && selected[0]==r && selected[1]==c)
-      d.classList.add("selected");
-
-    if(legal.some(m=>m[0]==r && m[1]==c))
-      d.classList.add("highlight");
-
-    d.innerText=board[r][c];
-    d.onclick=()=>clickCell(r,c);
-    boardDiv.appendChild(d);
-  }
- }
-}
-
-function clickCell(r,c){
- let p = board[r][c];
-
- if(selected){
-   if(legal.some(m=>m[0]==r && m[1]==c)){
-     sendMove(selected[0],selected[1],r,c);
-     move(selected[0],selected[1],r,c);
-     turn = turn==="w"?"b":"w";
-   }
-   selected=null;
-   legal=[];
- } else {
-   if(p && ((turn==="w" && isWhite(p)) || (turn==="b" && !isWhite(p)))){
-     selected=[r,c];
-     legal=getLegalMoves(r,c);
-   }
- }
- draw();
-}
-
-function inBounds(r,c){ return r>=0&&r<8&&c>=0&&c<8; }
-
-function rawMoves(r,c){
- let p=board[r][c];
- if(!p) return [];
- let moves=[];
- let dr,dc;
-
- if(p==="P"){
-   if(board[r-1]?.[c]==="") moves.push([r-1,c]);
-   if(r==6 && board[4][c]==="") moves.push([4,c]);
-   for(let d of [-1,1]){
-     if(board[r-1]?.[c+d] && !isWhite(board[r-1][c+d]))
-       moves.push([r-1,c+d]);
-   }
- }
-
- if(p==="p"){
-   if(board[r+1]?.[c]==="") moves.push([r+1,c]);
-   if(r==1 && board[3][c]==="") moves.push([3,c]);
-   for(let d of [-1,1]){
-     if(board[r+1]?.[c+d] && isWhite(board[r+1][c+d]))
-       moves.push([r+1,c+d]);
-   }
- }
-
- if("rRqQ".includes(p)){
-   for(let [dr,dc] of [[1,0],[-1,0],[0,1],[0,-1]]){
-     let nr=r+dr,nc=c+dc;
-     while(inBounds(nr,nc)){
-       if(board[nr][nc]===""){ moves.push([nr,nc]); }
-       else{
-         if(isWhite(board[nr][nc])!=isWhite(p)) moves.push([nr,nc]);
-         break;
-       }
-       nr+=dr; nc+=dc;
-     }
-   }
- }
-
- if("bBqQ".includes(p)){
-   for(let [dr,dc] of [[1,1],[1,-1],[-1,1],[-1,-1]]){
-     let nr=r+dr,nc=c+dc;
-     while(inBounds(nr,nc)){
-       if(board[nr][nc]===""){ moves.push([nr,nc]); }
-       else{
-         if(isWhite(board[nr][nc])!=isWhite(p)) moves.push([nr,nc]);
-         break;
-       }
-       nr+=dr; nc+=dc;
-     }
-   }
- }
-
- if("nN".includes(p)){
-   for(let [dr,dc] of [[2,1],[2,-1],[-2,1],[-2,-1],[1,2],[1,-2],[-1,2],[-1,-2]]){
-     let nr=r+dr,nc=c+dc;
-     if(inBounds(nr,nc) && (!board[nr][nc] || isWhite(board[nr][nc])!=isWhite(p)))
-       moves.push([nr,nc]);
-   }
- }
-
- if("kK".includes(p)){
-   for(let dr=-1;dr<=1;dr++){
-     for(let dc=-1;dc<=1;dc++){
-       if(dr||dc){
-         let nr=r+dr,nc=c+dc;
-         if(inBounds(nr,nc) && (!board[nr][nc] || isWhite(board[nr][nc])!=isWhite(p)))
-           moves.push([nr,nc]);
-       }
-     }
-   }
- }
-
- return moves;
-}
-
-function cloneBoard(b){ return JSON.parse(JSON.stringify(b)); }
-
-function findKing(color,b){
- for(let r=0;r<8;r++)
-  for(let c=0;c<8;c++)
-   if(b[r][c]===(color==="w"?"K":"k")) return [r,c];
-}
-
-function inCheck(color,b){
- let [kr,kc]=findKing(color,b);
- for(let r=0;r<8;r++){
-  for(let c=0;c<8;c++){
-   let p=b[r][c];
-   if(p && (isWhite(p)!=(color==="w"))){
-     let moves=rawMoves(r,c);
-     if(moves.some(m=>m[0]==kr && m[1]==kc)) return true;
-   }
-  }
- }
- return false;
-}
-
-function getLegalMoves(r,c){
- let p=board[r][c];
- let color=isWhite(p)?"w":"b";
- let moves=[];
- for(let [er,ec] of rawMoves(r,c)){
-   let b=cloneBoard(board);
-   b[er][ec]=b[r][c];
-   b[r][c]="";
-   if(!inCheck(color,b)) moves.push([er,ec]);
- }
- return moves;
-}
-
-function move(sr,sc,er,ec){
- board[er][ec]=board[sr][sc];
- board[sr][sc]="";
-}
-
-//// P2P ////
-
-let pc = new RTCPeerConnection({
-  iceServers:[{urls:"stun:stun.l.google.com:19302"}]
-});
-let channel;
-
-function setupChannel(ch){
- channel=ch;
- channel.onmessage=e=>{
-  let m=JSON.parse(e.data);
-  move(m.sr,m.sc,m.er,m.ec);
-  turn=turn==="w"?"b":"w";
-  draw();
- };
-}
-
-async function createOffer(){
- let ch=pc.createDataChannel("chess");
- setupChannel(ch);
- let offer=await pc.createOffer();
- await pc.setLocalDescription(offer);
-}
-
-async function joinRoom(){
- pc.ondatachannel=e=>setupChannel(e.channel);
-}
-
-async function connect(){
- let remote=JSON.parse(document.getElementById("remote").value);
- await pc.setRemoteDescription(remote);
- if(remote.type==="offer"){
-  let ans=await pc.createAnswer();
-  await pc.setLocalDescription(ans);
- }
-}
-
-pc.onicecandidate=e=>{
- if(!e.candidate){
-  document.getElementById("code").value=JSON.stringify(pc.localDescription);
- }
+// ---------- Firebase Setup ----------
+const firebaseConfig = {
+  apiKey: "YOUR_API_KEY",
+  authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
+  databaseURL: "https://YOUR_PROJECT_ID.firebaseio.com",
+  projectId: "YOUR_PROJECT_ID",
+  storageBucket: "YOUR_PROJECT_ID.appspot.com",
+  messagingSenderId: "SENDER_ID",
+  appId: "APP_ID"
 };
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();// ---------- Board Setup ---------- const boardEl = document.getElementById('board'); let board = []; const squares = []; const piecesImages = ['wp','bp','wr','br','wn','bn','wb','bb','wq','bq','wk','bk']; const images = {}; piecesImages.forEach(p => { let img = new Image(); img.src = p+'.png'; images[p]=img; });
 
-function sendMove(sr,sc,er,ec){
- if(channel) channel.send(JSON.stringify({sr,sc,er,ec}));
-}
+let selected = null; let legalMoves = []; let myColor = 'w'; let roomCode = '';
 
-draw();
+// Initialize board array function initBoard() { const initial = [ ['br','bn','bb','bq','bk','bb','bn','br'], ['bp','bp','bp','bp','bp','bp','bp','bp'], ['','','','','','','',''], ['','','','','','','',''], ['','','','','','','',''], ['','','','','','','',''], ['wp','wp','wp','wp','wp','wp','wp','wp'], ['wr','wn','wb','wq','wk','wb','wn','wr'] ]; board = initial.map(r => r.slice()); }
 
-</script>
+// Draw board function drawBoard() { boardEl.innerHTML = ''; for(let r=0;r<8;r++){ for(let c=0;c<8;c++){ const sq = document.createElement('div'); sq.classList.add('square'); sq.classList.add((r+c)%2===0?'white':'black'); sq.dataset.r=r; sq.dataset.c=c; sq.onclick = () => clickSquare(r,c); if(board[r][c]){ const img = images[board[r][c]].cloneNode(); sq.appendChild(img); } boardEl.appendChild(sq); squares.push(sq); } } }
+
+function clickSquare(r,c){ const piece = board[r][c]; if(selected){ // Try move if(legalMoves.some(m => m[0]===r && m[1]===c)){ movePiece(selected[0],selected[1],r,c); selected=null; legalMoves=[]; drawBoard(); sendMove(r,c); return; } else { selected=null; legalMoves=[]; drawBoard(); } } if(piece && piece[0]===myColor){ selected=[r,c]; legalMoves = getMoves(r,c); highlightMoves(); } }
+
+function highlightMoves(){ legalMoves.forEach(([r,c]) => { const idx = r*8+c; squares[idx].style.outline='3px solid green'; }); }
+
+function movePiece(sr,sc,er,ec){ board[er][ec] = board[sr][sc]; board[sr][sc]=''; }
+
+// ---------- Chess Logic (simple for demo) ---------- function getMoves(r,c){ const p = board[r][c]; const moves=[]; if(!p) return moves; const dir = p[0]==='w'?-1:1; if(p[1]==='p'){ if(board[r+dir][c]==='') moves.push([r+dir,c]); } // Add more piece logic here as needed return moves; }
+
+// ---------- Multiplayer ---------- function createRoom(){ roomCode = Math.floor(1000+Math.random()*9000).toString(); myColor='w'; db.ref('rooms/'+roomCode).set({board}); document.getElementById('roomInput').value=roomCode; document.getElementById('status').innerText='Room created: '+roomCode; listenMoves(); }
+
+function joinRoom(){ roomCode=document.getElementById('roomInput').value; myColor='b'; db.ref('rooms/'+roomCode+'/board').once('value',snap=>{ board = snap.val(); drawBoard(); }); document.getElementById('status').innerText='Joined room: '+roomCode; listenMoves(); }
+
+function sendMove(r,c){ if(!roomCode) return; db.ref('rooms/'+roomCode+'/board').set(board); }
+
+function listenMoves(){ db.ref('rooms/'+roomCode+'/board').on('value',snap=>{ if(!snap.val()) return; board=snap.val(); drawBoard(); }); }
+
+initBoard(); drawBoard(); </script>
 
 </body>
 </html>
