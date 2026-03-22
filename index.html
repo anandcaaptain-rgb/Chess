@@ -1,16 +1,17 @@
 <!DOCTYPE html><html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>My Chess Game</title>
+<title>Web Chess Multiplayer</title>
 <style>
-  body { display:flex; justify-content:center; margin-top:20px; }
-  #board { display:grid; grid-template-columns: repeat(8, 60px); grid-template-rows: repeat(8, 60px); }
-  .square { width:60px; height:60px; display:flex; justify-content:center; align-items:center; }
-  .white { background:#f0d9b5; }
-  .black { background:#b58863; }
-  img { width:50px; height:50px; pointer-events:none; }
-  #roomUI { margin-left:20px; }
-  button { margin-top:5px; }
+  body{display:flex;justify-content:center;margin-top:20px;font-family:sans-serif;}
+  #board{display:grid;grid-template-columns:repeat(8,60px);grid-template-rows:repeat(8,60px);border:3px solid #333;}
+  .square{width:60px;height:60px;display:flex;justify-content:center;align-items:center;position:relative;}
+  .white{background:#f0d9b5;}
+  .black{background:#b58863;}
+  img{width:50px;height:50px;pointer-events:none;}
+  #roomUI{margin-left:20px;}
+  button,input{margin:5px 0;padding:5px;}
+  .highlight{outline:3px solid green;}
 </style>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
@@ -18,48 +19,32 @@
 <body>
 <div id="board"></div>
 <div id="roomUI">
-  <input id="roomInput" placeholder="Room code" />
-  <button onclick="createRoom()">Create Room</button>
-  <button onclick="joinRoom()">Join Room</button>
-  <div id="status"></div>
+<input id="roomInput" placeholder="Room code" />
+<button onclick="createRoom()">Create Room</button>
+<button onclick="joinRoom()">Join Room</button>
+<div id="status"></div>
 </div>
 <script>
-// ---------- Firebase Setup ----------
-const firebaseConfig = {
-  apiKey: "YOUR_API_KEY",
-  authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
-  databaseURL: "https://YOUR_PROJECT_ID.firebaseio.com",
-  projectId: "YOUR_PROJECT_ID",
-  storageBucket: "YOUR_PROJECT_ID.appspot.com",
-  messagingSenderId: "SENDER_ID",
-  appId: "APP_ID"
-};
+// Firebase config
+const firebaseConfig={apiKey:"YOUR_API_KEY",authDomain:"YOUR_PROJECT_ID.firebaseapp.com",databaseURL:"https://YOUR_PROJECT_ID.firebaseio.com",projectId:"YOUR_PROJECT_ID",storageBucket:"YOUR_PROJECT_ID.appspot.com",messagingSenderId:"SENDER_ID",appId:"APP_ID"};
 firebase.initializeApp(firebaseConfig);
-const db = firebase.database();// ---------- Board Setup ---------- const boardEl = document.getElementById('board'); let board = []; const squares = []; const piecesImages = ['wp','bp','wr','br','wn','bn','wb','bb','wq','bq','wk','bk']; const images = {}; piecesImages.forEach(p => { let img = new Image(); img.src = p+'.png'; images[p]=img; });
+const db=firebase.database();// Chess board setup const boardEl=document.getElementById('board'); let board=[]; const squares=[]; const images={}; ['wp','bp','wr','br','wn','bn','wb','bb','wq','bq','wk','bk'].forEach(p=>{let img=new Image();img.src=p+'.png';images[p]=img;}); let selected=null,legalMoves=[],myColor='w',roomCode='';
 
-let selected = null; let legalMoves = []; let myColor = 'w'; let roomCode = '';
+function initBoard(){ const initial=[ ['br','bn','bb','bq','bk','bb','bn','br'], ['bp','bp','bp','bp','bp','bp','bp','bp'], ['','','','','','','',''], ['','','','','','','',''], ['','','','','','','',''], ['','','','','','','',''], ['wp','wp','wp','wp','wp','wp','wp','wp'], ['wr','wn','wb','wq','wk','wb','wn','wr'] ]; board=initial.map(r=>r.slice()); }
 
-// Initialize board array function initBoard() { const initial = [ ['br','bn','bb','bq','bk','bb','bn','br'], ['bp','bp','bp','bp','bp','bp','bp','bp'], ['','','','','','','',''], ['','','','','','','',''], ['','','','','','','',''], ['','','','','','','',''], ['wp','wp','wp','wp','wp','wp','wp','wp'], ['wr','wn','wb','wq','wk','wb','wn','wr'] ]; board = initial.map(r => r.slice()); }
+function drawBoard(){ boardEl.innerHTML=''; for(let r=0;r<8;r++){ for(let c=0;c<8;c++){ const sq=document.createElement('div'); sq.classList.add('square',(r+c)%2===0?'white':'black'); sq.dataset.r=r;sq.dataset.c=c; sq.onclick=()=>clickSquare(r,c); if(board[r][c]){ const img=images[board[r][c]].cloneNode(); sq.appendChild(img); } boardEl.appendChild(sq); squares.push(sq); } } }
 
-// Draw board function drawBoard() { boardEl.innerHTML = ''; for(let r=0;r<8;r++){ for(let c=0;c<8;c++){ const sq = document.createElement('div'); sq.classList.add('square'); sq.classList.add((r+c)%2===0?'white':'black'); sq.dataset.r=r; sq.dataset.c=c; sq.onclick = () => clickSquare(r,c); if(board[r][c]){ const img = images[board[r][c]].cloneNode(); sq.appendChild(img); } boardEl.appendChild(sq); squares.push(sq); } } }
+function clickSquare(r,c){ const piece=board[r][c]; if(selected){ if(legalMoves.some(m=>m[0]===r && m[1]===c)){ movePiece(selected[0],selected[1],r,c); selected=null;legalMoves=[];drawBoard();sendMove();return; } else {selected=null;legalMoves=[];drawBoard();} } if(piece && piece[0]===myColor){selected=[r,c];legalMoves=getMoves(r,c);highlightMoves();} }
 
-function clickSquare(r,c){ const piece = board[r][c]; if(selected){ // Try move if(legalMoves.some(m => m[0]===r && m[1]===c)){ movePiece(selected[0],selected[1],r,c); selected=null; legalMoves=[]; drawBoard(); sendMove(r,c); return; } else { selected=null; legalMoves=[]; drawBoard(); } } if(piece && piece[0]===myColor){ selected=[r,c]; legalMoves = getMoves(r,c); highlightMoves(); } }
+function highlightMoves(){ legalMoves.forEach(([r,c])=>{const idx=r*8+c;squares[idx].classList.add('highlight');}); }
 
-function highlightMoves(){ legalMoves.forEach(([r,c]) => { const idx = r*8+c; squares[idx].style.outline='3px solid green'; }); }
+function movePiece(sr,sc,er,ec){board[er][ec]=board[sr][sc];board[sr][sc]='';}
 
-function movePiece(sr,sc,er,ec){ board[er][ec] = board[sr][sc]; board[sr][sc]=''; }
+// ---------- Simple Chess Logic ---------- function getMoves(r,c){ const p=board[r][c],moves=[]; if(!p)return moves; const dir=p[0]==='w'?-1:1; if(p[1]==='p'){if(inBounds(r+dir,c)&&board[r+dir][c]==='')moves.push([r+dir,c]);} // pawn move // TODO: add rook, bishop, knight, queen, king moves for full logic return moves; } function inBounds(r,c){return r>=0&&r<8&&c>=0&&c<8;}
 
-// ---------- Chess Logic (simple for demo) ---------- function getMoves(r,c){ const p = board[r][c]; const moves=[]; if(!p) return moves; const dir = p[0]==='w'?-1:1; if(p[1]==='p'){ if(board[r+dir][c]==='') moves.push([r+dir,c]); } // Add more piece logic here as needed return moves; }
+// ---------- Multiplayer ---------- function createRoom(){ roomCode=Math.floor(1000+Math.random()*9000).toString(); myColor='w'; db.ref('rooms/'+roomCode).set({board}); document.getElementById('roomInput').value=roomCode; document.getElementById('status').innerText='Room created: '+roomCode; listenMoves(); } function joinRoom(){ roomCode=document.getElementById('roomInput').value; myColor='b'; db.ref('rooms/'+roomCode+'/board').once('value',snap=>{board=snap.val();drawBoard();}); document.getElementById('status').innerText='Joined room: '+roomCode; listenMoves(); } function sendMove(){if(!roomCode)return;db.ref('rooms/'+roomCode+'/board').set(board);} function listenMoves(){db.ref('rooms/'+roomCode+'/board').on('value',snap=>{if(!snap.val())return;board=snap.val();drawBoard();});}
 
-// ---------- Multiplayer ---------- function createRoom(){ roomCode = Math.floor(1000+Math.random()*9000).toString(); myColor='w'; db.ref('rooms/'+roomCode).set({board}); document.getElementById('roomInput').value=roomCode; document.getElementById('status').innerText='Room created: '+roomCode; listenMoves(); }
-
-function joinRoom(){ roomCode=document.getElementById('roomInput').value; myColor='b'; db.ref('rooms/'+roomCode+'/board').once('value',snap=>{ board = snap.val(); drawBoard(); }); document.getElementById('status').innerText='Joined room: '+roomCode; listenMoves(); }
-
-function sendMove(r,c){ if(!roomCode) return; db.ref('rooms/'+roomCode+'/board').set(board); }
-
-function listenMoves(){ db.ref('rooms/'+roomCode+'/board').on('value',snap=>{ if(!snap.val()) return; board=snap.val(); drawBoard(); }); }
-
-initBoard(); drawBoard(); </script>
+initBoard();drawBoard(); </script>
 
 </body>
 </html>
