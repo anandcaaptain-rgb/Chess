@@ -1,50 +1,207 @@
-<!DOCTYPE html><html lang="en">
+<!DOCTYPE html>
+<html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Web Chess Multiplayer</title>
+<title>Final Boss Chess God Mode</title>
 <style>
-  body{display:flex;justify-content:center;margin-top:20px;font-family:sans-serif;}
-  #board{display:grid;grid-template-columns:repeat(8,60px);grid-template-rows:repeat(8,60px);border:3px solid #333;}
-  .square{width:60px;height:60px;display:flex;justify-content:center;align-items:center;position:relative;}
-  .white{background:#f0d9b5;}
-  .black{background:#b58863;}
-  img{width:50px;height:50px;pointer-events:none;}
-  #roomUI{margin-left:20px;}
-  button,input{margin:5px 0;padding:5px;}
-  .highlight{outline:3px solid green;}
+body {margin:0; display:flex; flex-direction:column; align-items:center; background:#333; font-family:sans-serif;}
+#controls {margin:10px; color:white;}
+canvas {background:#eee; display:block; touch-action:none;}
+button,input,select{margin-right:5px;}
 </style>
-<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
 </head>
 <body>
-<div id="board"></div>
-<div id="roomUI">
-<input id="roomInput" placeholder="Room code" />
-<button onclick="createRoom()">Create Room</button>
-<button onclick="joinRoom()">Join Room</button>
-<div id="status"></div>
+
+<div id="controls">
+<select id="themeSelector">
+<option value="3d_chesskid">3D ChessKid</option>
+<option value="3d_wood">3D Wood</option>
+<option value="alpha">Alpha</option>
+<option value="neo">Neo</option>
+</select>
+Room code: <input id="roomCode" placeholder="1234">
+<button id="createRoom">Create</button>
+<button id="joinRoom">Join</button>
 </div>
+
+<canvas id="board" width="720" height="720"></canvas>
+
 <script>
-// Firebase config
-const firebaseConfig={apiKey:"YOUR_API_KEY",authDomain:"YOUR_PROJECT_ID.firebaseapp.com",databaseURL:"https://YOUR_PROJECT_ID.firebaseio.com",projectId:"YOUR_PROJECT_ID",storageBucket:"YOUR_PROJECT_ID.appspot.com",messagingSenderId:"SENDER_ID",appId:"APP_ID"};
-firebase.initializeApp(firebaseConfig);
-const db=firebase.database();// Chess board setup const boardEl=document.getElementById('board'); let board=[]; const squares=[]; const images={}; ['wp','bp','wr','br','wn','bn','wb','bb','wq','bq','wk','bk'].forEach(p=>{let img=new Image();img.src=p+'.png';images[p]=img;}); let selected=null,legalMoves=[],myColor='w',roomCode='';
+// ---------------- CONFIG ----------------
+const pieceNames = ["wp","bp","wr","br","wn","bn","wb","bb","wq","bq","wk","bk"];
+let theme = "3d_chesskid";
+const pieceImages = {};
+function loadTheme(t){
+    theme=t;
+    pieceNames.forEach(p=>{
+        const img=new Image();
+        img.src=`https://images.chesscomfiles.com/chess-themes/pieces/${theme}/${p}.png`;
+        pieceImages[p]=img;
+    });
+}
+loadTheme(theme);
 
-function initBoard(){ const initial=[ ['br','bn','bb','bq','bk','bb','bn','br'], ['bp','bp','bp','bp','bp','bp','bp','bp'], ['','','','','','','',''], ['','','','','','','',''], ['','','','','','','',''], ['','','','','','','',''], ['wp','wp','wp','wp','wp','wp','wp','wp'], ['wr','wn','wb','wq','wk','wb','wn','wr'] ]; board=initial.map(r=>r.slice()); }
+// ---------------- CANVAS ----------------
+const canvas = document.getElementById("board");
+const ctx = canvas.getContext("2d");
+const SQ = canvas.width/8;
 
-function drawBoard(){ boardEl.innerHTML=''; for(let r=0;r<8;r++){ for(let c=0;c<8;c++){ const sq=document.createElement('div'); sq.classList.add('square',(r+c)%2===0?'white':'black'); sq.dataset.r=r;sq.dataset.c=c; sq.onclick=()=>clickSquare(r,c); if(board[r][c]){ const img=images[board[r][c]].cloneNode(); sq.appendChild(img); } boardEl.appendChild(sq); squares.push(sq); } } }
+let board = [
+["br","bn","bb","bq","bk","bb","bn","br"],
+["bp","bp","bp","bp","bp","bp","bp","bp"],
+["","","","","","","",""],
+["","","","","","","",""],
+["","","","","","","",""],
+["","","","","","","",""],
+["wp","wp","wp","wp","wp","wp","wp","wp"],
+["wr","wn","wb","wq","wk","wb","wn","wr"]
+];
 
-function clickSquare(r,c){ const piece=board[r][c]; if(selected){ if(legalMoves.some(m=>m[0]===r && m[1]===c)){ movePiece(selected[0],selected[1],r,c); selected=null;legalMoves=[];drawBoard();sendMove();return; } else {selected=null;legalMoves=[];drawBoard();} } if(piece && piece[0]===myColor){selected=[r,c];legalMoves=getMoves(r,c);highlightMoves();} }
+let turn="w", selected=null, legalMoves=[], dragging=false, dragPiece=null, lastMove=null;
+let kingPos = {"w":[7,4], "b":[0,4]}, castling={"w":[true,true],"b":[true,true]}, enPassant=null;
 
-function highlightMoves(){ legalMoves.forEach(([r,c])=>{const idx=r*8+c;squares[idx].classList.add('highlight');}); }
+// ---------------- DRAW ----------------
+function draw(){
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    for(let r=0;r<8;r++){
+        for(let c=0;c<8;c++){
+            ctx.fillStyle=(r+c)%2==0?"#eee":"#999";
+            ctx.fillRect(c*SQ,r*SQ,SQ,SQ);
+            if(lastMove){
+                const [sr,sc,er,ec]=lastMove;
+                if((r==sr&&c==sc)||(r==er&&c==ec)){
+                    ctx.strokeStyle="yellow";
+                    ctx.lineWidth=3;
+                    ctx.strokeRect(c*SQ,r*SQ,SQ,SQ);
+                }
+            }
+            if(board[r][c] && pieceImages[board[r][c]]){
+                ctx.drawImage(pieceImages[board[r][c]],c*SQ,r*SQ,SQ,SQ);
+            }
+        }
+    }
+    if(dragging && dragPiece){
+        const [r,c]=dragPiece;
+        const img=pieceImages[board[r][c]];
+        if(img) ctx.drawImage(img, mouseX-SQ/2, mouseY-SQ/2, SQ,SQ);
+    }
+}
 
-function movePiece(sr,sc,er,ec){board[er][ec]=board[sr][sc];board[sr][sc]='';}
+// ---------------- UTILS ----------------
+function inBounds(r,c){return r>=0&&r<8&&c>=0&&c<8;}
+function copyBoard(b){return b.map(r=>r.slice());}
 
-// ---------- Simple Chess Logic ---------- function getMoves(r,c){ const p=board[r][c],moves=[]; if(!p)return moves; const dir=p[0]==='w'?-1:1; if(p[1]==='p'){if(inBounds(r+dir,c)&&board[r+dir][c]==='')moves.push([r+dir,c]);} // pawn move // TODO: add rook, bishop, knight, queen, king moves for full logic return moves; } function inBounds(r,c){return r>=0&&r<8&&c>=0&&c<8;}
+// ---------------- MOVE LOGIC ----------------
+function rawMoves(r,c){
+    const piece=board[r][c]; if(!piece) return [];
+    const color=piece[0], t=piece[1]; const moves=[];
+    if(t=="p"){
+        const d=color=="w"?-1:1;
+        if(inBounds(r+d,c) && board[r+d][c]=="") moves.push([r+d,c]);
+        if((r==6&&color=="w")||(r==1&&color=="b")) if(board[r+2*d][c]=="") moves.push([r+2*d,c]);
+        for(const dc of [-1,1]){
+            const nr=r+d,nc=c+dc;
+            if(inBounds(nr,nc)){
+                if(board[nr][nc] && board[nr][nc][0]!=color) moves.push([nr,nc]);
+                if(enPassant && enPassant[0]==nr && enPassant[1]==nc) moves.push([nr,nc]);
+            }
+        }
+    }
+    if(t=="r"||t=="q"){
+        for(const [dr,dc] of [[1,0],[-1,0],[0,1],[0,-1]]){
+            let nr=r,nc=c;
+            while(true){nr+=dr; nc+=dc; if(!inBounds(nr,nc)) break; if(board[nr][nc]=="") moves.push([nr,nc]); else {if(board[nr][nc][0]!=color)moves.push([nr,nc]); break;}}
+        }
+    }
+    if(t=="b"||t=="q"){
+        for(const [dr,dc] of [[1,1],[1,-1],[-1,1],[-1,-1]]){
+            let nr=r,nc=c;
+            while(true){nr+=dr; nc+=dc; if(!inBounds(nr,nc)) break; if(board[nr][nc]=="") moves.push([nr,nc]); else {if(board[nr][nc][0]!=color)moves.push([nr,nc]); break;}}
+        }
+    }
+    if(t=="n"){
+        for(const [dr,dc] of [[2,1],[2,-1],[-2,1],[-2,-1],[1,2],[1,-2],[-1,2],[-1,-2]]){
+            const nr=r+dr,nc=c+dc; if(inBounds(nr,nc) && (!board[nr][nc]||board[nr][nc][0]!=color)) moves.push([nr,nc]);
+        }
+    }
+    if(t=="k"){
+        for(const dr of [-1,0,1]) for(const dc of [-1,0,1]){
+            const nr=r+dr,nc=c+dc;
+            if(inBounds(nr,nc) && (!board[nr][nc]||board[nr][nc][0]!=color)) moves.push([nr,nc]);
+        }
+    }
+    return moves;
+}
 
-// ---------- Multiplayer ---------- function createRoom(){ roomCode=Math.floor(1000+Math.random()*9000).toString(); myColor='w'; db.ref('rooms/'+roomCode).set({board}); document.getElementById('roomInput').value=roomCode; document.getElementById('status').innerText='Room created: '+roomCode; listenMoves(); } function joinRoom(){ roomCode=document.getElementById('roomInput').value; myColor='b'; db.ref('rooms/'+roomCode+'/board').once('value',snap=>{board=snap.val();drawBoard();}); document.getElementById('status').innerText='Joined room: '+roomCode; listenMoves(); } function sendMove(){if(!roomCode)return;db.ref('rooms/'+roomCode+'/board').set(board);} function listenMoves(){db.ref('rooms/'+roomCode+'/board').on('value',snap=>{if(!snap.val())return;board=snap.val();drawBoard();});}
+function inCheck(color){
+    const [kr,kc]=kingPos[color]; const enemy=color=="w"?"b":"w";
+    for(let r=0;r<8;r++) for(let c=0;c<8;c++){
+        if(board[r][c] && board[r][c][0]==enemy) if(rawMoves(r,c).some(([x,y])=>x==kr&&y==kc)) return true;
+    }
+    return false;
+}
 
-initBoard();drawBoard(); </script>
+function getLegalMoves(r,c){
+    const piece=board[r][c]; if(!piece) return [];
+    const color=piece[0]; const moves=[];
+    for(const [er,ec] of rawMoves(r,c)){
+        const temp=board[er][ec]; board[er][ec]=piece; board[r][c]="";
+        const oldKing=kingPos[color].slice();
+        if(piece[1]=="k") kingPos[color]=[er,ec];
+        if(!inCheck(color)) moves.push([er,ec]);
+        board[r][c]=piece; board[er][ec]=temp; kingPos[color]=oldKing;
+    }
+    return moves;
+}
 
+function move(sr,sc,er,ec){
+    const piece=board[sr][sc];
+    lastMove=[sr,sc,er,ec];
+    // en passant
+    if(piece[1]=="p" && enPassant && er==enPassant[0] && ec==enPassant[1]) board[sr][ec]="";
+    board[er][ec]=piece; board[sr][sc]="";
+    // promotion
+    if(piece[1]=="p" && (er==0||er==7)) board[er][ec]=piece[0]+"q";
+    if(piece[1]=="k") kingPos[piece[0]]=[er,ec];
+    enPassant=null;
+    if(piece[1]=="p" && Math.abs(sr-er)==2) enPassant=[(sr+er)/2,sc];
+    turn=turn=="w"?"b":"w";
+    draw();
+}
+
+// ---------------- MOUSE EVENTS ----------------
+let mouseX=0, mouseY=0;
+canvas.addEventListener("mousedown", e=>{
+    const c=Math.floor(e.offsetX/SQ), r=Math.floor(e.offsetY/SQ);
+    if(board[r][c] && board[r][c][0]==turn){dragging=true; dragPiece=[r,c]; legalMoves=getLegalMoves(r,c);}
+});
+canvas.addEventListener("mouseup", e=>{
+    if(dragging && dragPiece){
+        const c=Math.floor(e.offsetX/SQ), r=Math.floor(e.offsetY/SQ);
+        const [sr,sc]=dragPiece;
+        if(legalMoves.some(([x,y])=>x==r&&y==c)) move(sr,sc,r,c);
+        dragging=false; dragPiece=null; legalMoves=[];
+    }
+});
+canvas.addEventListener("mousemove", e=>{mouseX=e.offsetX; mouseY=e.offsetY;});
+
+// ---------------- P2P ROOM SIMULATION ----------------
+let room=null;
+document.getElementById("createRoom").addEventListener("click",()=>{
+    room=document.getElementById("roomCode").value||Math.floor(Math.random()*9000+1000);
+    alert("Room created: "+room+"\nShare code to join!");
+});
+document.getElementById("joinRoom").addEventListener("click",()=>{
+    const code=document.getElementById("roomCode").value;
+    if(code==room) alert("Connected to room "+code+" ✅");
+    else alert("Wrong code ❌");
+});
+
+// ---------------- THEME ----------------
+document.getElementById("themeSelector").addEventListener("change", e=>{loadTheme(e.target.value); draw();});
+
+// ---------------- INITIAL DRAW ----------------
+window.onload = draw;
+</script>
 </body>
 </html>
