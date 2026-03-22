@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Final Boss Chess God Mode</title>
+<title>Final Boss Chess Mobile</title>
 <style>
 body {margin:0; display:flex; flex-direction:column; align-items:center; background:#333; font-family:sans-serif;}
 #controls {margin:10px; color:white;}
@@ -31,15 +31,25 @@ Room code: <input id="roomCode" placeholder="1234">
 const pieceNames = ["wp","bp","wr","br","wn","bn","wb","bb","wq","bq","wk","bk"];
 let theme = "3d_chesskid";
 const pieceImages = {};
+let imagesLoaded = false;
+
 function loadTheme(t){
-    theme=t;
+    theme = t;
+    imagesLoaded = false;
+    let loaded = 0;
     pieceNames.forEach(p=>{
-        const img=new Image();
-        img.src=`https://images.chesscomfiles.com/chess-themes/pieces/${theme}/${p}.png`;
-        pieceImages[p]=img;
+        const img = new Image();
+        img.src = `https://images.chesscomfiles.com/chess-themes/pieces/${theme}/${p}.png`;
+        img.onload = ()=>{
+            loaded++;
+            if(loaded === pieceNames.length){
+                imagesLoaded = true;
+                draw();
+            }
+        };
+        pieceImages[p] = img;
     });
 }
-loadTheme(theme);
 
 // ---------------- CANVAS ----------------
 const canvas = document.getElementById("board");
@@ -62,6 +72,7 @@ let kingPos = {"w":[7,4], "b":[0,4]}, castling={"w":[true,true],"b":[true,true]}
 
 // ---------------- DRAW ----------------
 function draw(){
+    if(!imagesLoaded) return;
     ctx.clearRect(0,0,canvas.width,canvas.height);
     for(let r=0;r<8;r++){
         for(let c=0;c<8;c++){
@@ -169,23 +180,41 @@ function move(sr,sc,er,ec){
     draw();
 }
 
-// ---------------- MOUSE EVENTS ----------------
+// ---------------- MOUSE & TOUCH EVENTS ----------------
 let mouseX=0, mouseY=0;
-canvas.addEventListener("mousedown", e=>{
-    const c=Math.floor(e.offsetX/SQ), r=Math.floor(e.offsetY/SQ);
+
+function getMousePos(e){
+    const rect=canvas.getBoundingClientRect();
+    if(e.touches) return {x:e.touches[0].clientX-rect.left, y:e.touches[0].clientY-rect.top};
+    return {x:e.offsetX, y:e.offsetY};
+}
+
+canvas.addEventListener("mousedown", startDrag);
+canvas.addEventListener("mousemove", doDrag);
+canvas.addEventListener("mouseup", endDrag);
+
+canvas.addEventListener("touchstart", startDrag);
+canvas.addEventListener("touchmove", doDrag);
+canvas.addEventListener("touchend", endDrag);
+
+function startDrag(e){
+    const pos=getMousePos(e); mouseX=pos.x; mouseY=pos.y;
+    const r=Math.floor(mouseY/SQ), c=Math.floor(mouseX/SQ);
     if(board[r][c] && board[r][c][0]==turn){dragging=true; dragPiece=[r,c]; legalMoves=getLegalMoves(r,c);}
-});
-canvas.addEventListener("mouseup", e=>{
+}
+function doDrag(e){
+    if(dragging){const pos=getMousePos(e); mouseX=pos.x; mouseY=pos.y; draw();}
+}
+function endDrag(e){
     if(dragging && dragPiece){
-        const c=Math.floor(e.offsetX/SQ), r=Math.floor(e.offsetY/SQ);
+        const pos=getMousePos(e); const r=Math.floor(pos.y/SQ), c=Math.floor(pos.x/SQ);
         const [sr,sc]=dragPiece;
         if(legalMoves.some(([x,y])=>x==r&&y==c)) move(sr,sc,r,c);
         dragging=false; dragPiece=null; legalMoves=[];
     }
-});
-canvas.addEventListener("mousemove", e=>{mouseX=e.offsetX; mouseY=e.offsetY;});
+}
 
-// ---------------- P2P ROOM SIMULATION ----------------
+// ---------------- ROOM CODE ----------------
 let room=null;
 document.getElementById("createRoom").addEventListener("click",()=>{
     room=document.getElementById("roomCode").value||Math.floor(Math.random()*9000+1000);
@@ -198,10 +227,11 @@ document.getElementById("joinRoom").addEventListener("click",()=>{
 });
 
 // ---------------- THEME ----------------
-document.getElementById("themeSelector").addEventListener("change", e=>{loadTheme(e.target.value); draw();});
+document.getElementById("themeSelector").addEventListener("change", e=>{loadTheme(e.target.value);});
 
-// ---------------- INITIAL DRAW ----------------
-window.onload = draw;
+// ---------------- INITIAL LOAD ----------------
+window.onload = ()=>{loadTheme(theme); draw();};
+
 </script>
 </body>
 </html>
